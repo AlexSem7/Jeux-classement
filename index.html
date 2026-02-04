@@ -3,21 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>L'Effet Miroir - Party</title>
+    <title>L'Effet Miroir - Le Grand Final</title>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-database-compat.js"></script>
     <style>
         :root { --primary: #6366f1; --secondary: #10b981; --bg: #f1f5f9; --accent: #f59e0b; }
         body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
-        .card { background: white; width: 100%; max-width: 400px; padding: 20px; border-radius: 15px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); margin-bottom: 20px; text-align: center; box-sizing: border-box; }
-        input, button { width: 100%; padding: 12px; margin: 8px 0; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 16px; box-sizing: border-box; }
+        .card { background: white; width: 100%; max-width: 450px; padding: 20px; border-radius: 15px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); margin-bottom: 20px; text-align: center; box-sizing: border-box; }
+        input, button, select { width: 100%; padding: 12px; margin: 8px 0; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 16px; box-sizing: border-box; }
         button { background: var(--primary); color: white; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; }
         button:active { transform: scale(0.98); }
         .player-item { background: white; border: 2px solid var(--primary); margin: 10px 0; padding: 15px; border-radius: 10px; cursor: grab; font-weight: bold; display: flex; justify-content: space-between; }
         .hidden { display: none; }
-        .result-item { text-align: left; padding: 10px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; }
-        #mod-panel { margin-top: 50px; border: 1px dashed #ccc; background: #fffcf0; }
+        .ranking-box { text-align: left; padding: 15px; border: 2px solid #ddd; border-radius: 10px; margin-bottom: 20px; background: #fff; }
+        #mod-panel { margin-top: 50px; border: 1px dashed #ccc; background: #fffcf0; opacity: 0.7; }
     </style>
 </head>
 <body>
@@ -36,33 +36,34 @@
         <h2>Salon : <span id="display-room-id" style="color:var(--primary)"></span></h2>
         <div id="player-list" style="margin: 15px 0;">Attente de joueurs...</div>
         <div id="admin-controls" class="hidden">
-            <button onclick="startGame()" style="background: var(--secondary)">DÉMARRER LE JEU</button>
+            <button onclick="startGame()" style="background: var(--secondary)">LANCER LA MANCHE 1</button>
         </div>
     </div>
 
     <div id="view-game" class="card hidden">
+        <div id="round-indicator" style="font-weight: bold; color: var(--accent);">Manche 1/4</div>
         <h3 id="current-q">Chargement...</h3>
         <div id="sort-list"></div>
         <button id="btn-vote" onclick="submitVote()">Valider mon classement</button>
-        <p id="wait-msg" class="hidden" style="color: #666; font-style: italic;">Attente des autres joueurs...</p>
+        <p id="wait-msg" class="hidden" style="color: #666; font-style: italic;">Vote enregistré. Attente des autres...</p>
         <div id="admin-reveal" class="hidden">
-            <button onclick="revealResults()" style="background: var(--accent)">RÉVÉLER LE CLASSEMENT</button>
+            <button onclick="finishRound()" style="background: var(--accent)">VALIDER CETTE MANCHE</button>
         </div>
     </div>
 
     <div id="view-results" class="card hidden">
-        <h2>Résultats Finales</h2>
+        <h2>🔍 Le Grand Final</h2>
+        <p>Reliez chaque classement à sa question !</p>
         <div id="results-list"></div>
-        <button onclick="backToLobby()" style="margin-top:20px;">Nouvelle Question</button>
     </div>
 
     <div class="card" id="mod-panel">
         <h4>🛠 Modération Banque (Admin)</h4>
-        <div id="full-bank-list" style="text-align:left; font-size:0.8em; max-height:200px; overflow-y:auto;"></div>
+        <div id="full-bank-list" style="text-align:left; font-size:0.8em; max-height:150px; overflow-y:auto;"></div>
     </div>
 
     <script>
-        // --- CONFIGURATION FIREBASE (REMPLACE AVEC TES CLÉS) ---
+        // --- CONFIGURATION FIREBASE ---
         const firebaseConfig = {
             apiKey: "AIzaSyBZrjaZ0NuoQkm2i8ZrBZEDm0iFNQ_xwRg",
             databaseURL: "https://jeux-classement-default-rtdb.europe-west1.firebasedatabase.app",
@@ -75,8 +76,10 @@
         let myName = "";
         let isAdmin = false;
         let players = [];
+        let currentRound = 1;
+        const MAX_ROUNDS = 4;
 
-        // --- GESTION DES ROOMS ---
+        // --- NAVIGATION ---
         function showCreateRoom() {
             myName = prompt("Ton prénom ?");
             if(!myName) return;
@@ -104,13 +107,18 @@
 
             db.ref(`rooms/${roomId}/players`).on('value', snap => {
                 players = Object.values(snap.val() || {});
-                document.getElementById('player-list').innerHTML = "<b>Joueurs connectés :</b><br>" + players.join(', ');
+                document.getElementById('player-list').innerHTML = "<b>Joueurs :</b> " + players.join(', ');
             });
 
             db.ref(`rooms/${roomId}/status`).on('value', snap => {
                 const status = snap.val();
                 if(status === "playing") startClientGame();
-                if(status === "finished") showResults();
+                if(status === "final_reveal") showFinalReveal();
+            });
+
+            db.ref(`rooms/${roomId}/round`).on('value', snap => {
+                currentRound = snap.val() || 1;
+                document.getElementById('round-indicator').innerText = `Manche ${currentRound}/${MAX_ROUNDS}`;
             });
 
             db.ref(`rooms/${roomId}/votes`).on('value', checkVotesStatus);
@@ -171,58 +179,83 @@
             });
         }
 
-        function revealResults() {
-            db.ref(`rooms/${roomId}`).update({ status: "finished" });
-        }
-
-        function showResults() {
-            hideAll();
-            document.getElementById('view-results').classList.remove('hidden');
-            
+        function finishRound() {
             db.ref(`rooms/${roomId}/votes`).once('value', snap => {
                 const allVotes = snap.val() || {};
+                const currentQ = document.getElementById('current-q').innerText;
+                
+                // Calculer moyenne
                 let scores = {};
                 players.forEach(p => scores[p] = 0);
                 const totalVotants = Object.keys(allVotes).length;
-
-                Object.values(allVotes).forEach(voteList => {
-                    voteList.forEach((name, index) => {
-                        if(scores[name] !== undefined) scores[name] += (index + 1);
-                    });
+                Object.values(allVotes).forEach(list => {
+                    list.forEach((name, i) => { if(scores[name]!==undefined) scores[name]+=(i+1); });
                 });
+                const avgRanking = Object.keys(scores)
+                    .map(name => ({name, score: (scores[name]/totalVotants).toFixed(1)}))
+                    .sort((a,b) => a.score - b.score);
 
-                let finalOrder = Object.keys(scores)
-                    .map(name => ({name, score: (scores[name] / totalVotants).toFixed(1)}))
-                    .sort((a, b) => a.score - b.score);
+                // Sauvegarder dans historique
+                db.ref(`rooms/${roomId}/history`).push({ question: currentQ, ranking: avgRanking });
 
-                const resDiv = document.getElementById('results-list');
-                resDiv.innerHTML = "";
-                finalOrder.forEach((item, i) => {
-                    resDiv.innerHTML += `<div class="result-item"><span>${i+1}. ${item.name}</span> <b>${item.score}</b></div>`;
-                });
+                if (currentRound >= MAX_ROUNDS) {
+                    db.ref(`rooms/${roomId}`).update({ status: "final_reveal" });
+                } else {
+                    db.ref(`rooms/${roomId}`).update({ round: currentRound + 1 });
+                    startGame();
+                }
             });
         }
 
-        function backToLobby() {
-            if(isAdmin) {
-                db.ref(`rooms/${roomId}`).update({ status: "waiting", votes: null });
-            }
+        // --- RÉSULTATS FINAUX ---
+        function showFinalReveal() {
+            hideAll();
+            document.getElementById('view-results').classList.remove('hidden');
+            const resDiv = document.getElementById('results-list');
+            resDiv.innerHTML = "";
+
+            db.ref(`rooms/${roomId}/history`).once('value', snap => {
+                const historyData = snap.val() || {};
+                const history = Object.values(historyData);
+                const questionsShuffle = history.map(h => h.question).sort(() => Math.random() - 0.5);
+
+                history.forEach((h, index) => {
+                    let html = `<div class="ranking-box">
+                        <b>Classement n°${index + 1} :</b><br>
+                        <small>${h.ranking.map((item, i) => (i+1)+". "+item.name).join(' | ')}</small>
+                        <select class="user-guess" data-correct="${h.question}">
+                            <option value="">-- Quelle était la question ? --</option>
+                            ${questionsShuffle.map(q => `<option value="${q}">${q}</option>`).join('')}
+                        </select>
+                    </div>`;
+                    resDiv.innerHTML += html;
+                });
+                resDiv.innerHTML += `<button onclick="checkAnswers()" style="background:var(--secondary)">VÉRIFIER MES RÉPONSES</button>
+                                     <div id="final-score" style="margin-top:20px; font-weight:bold;"></div>`;
+            });
+        }
+
+        function checkAnswers() {
+            const guesses = document.querySelectorAll('.user-guess');
+            let score = 0;
+            guesses.forEach(s => {
+                if(s.value === s.getAttribute('data-correct')) {
+                    score++; s.style.backgroundColor = "#dcfce7";
+                } else {
+                    s.style.backgroundColor = "#fee2e2";
+                }
+            });
+            document.getElementById('final-score').innerHTML = `Score final : ${score} / ${guesses.length}`;
         }
 
         function hideAll() {
-            ['view-home', 'view-lobby', 'view-game', 'view-results'].forEach(id => {
-                document.getElementById(id).classList.add('hidden');
-            });
+            ['view-home', 'view-lobby', 'view-game', 'view-results'].forEach(id => document.getElementById(id).classList.add('hidden'));
         }
 
-        // --- BANQUE & MODÉRATION ---
+        // --- BANQUE ---
         function addPublicQuestion() {
             const q = document.getElementById('public-q').value;
-            if(q) {
-                db.ref('public_bank').push(q);
-                document.getElementById('public-q').value = "";
-                alert("Ajoutée !");
-            }
+            if(q) { db.ref('public_bank').push(q); document.getElementById('public-q').value = ""; alert("Ajoutée !"); }
         }
 
         db.ref('public_bank').on('value', snap => {
@@ -237,9 +270,7 @@
             });
         });
 
-        function deleteQuestion(id) {
-            if(confirm("Supprimer ?")) db.ref(`public_bank/${id}`).remove();
-        }
+        function deleteQuestion(id) { if(confirm("Supprimer ?")) db.ref(`public_bank/${id}`).remove(); }
     </script>
 </body>
 </html>
