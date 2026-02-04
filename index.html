@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>L'Effet Miroir</title>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-database-compat.js"></script>
+
+    <style>
+        :root { --primary: #6366f1; --bg: #f8fafc; }
+        body { font-family: sans-serif; background: var(--bg); padding: 15px; max-width: 500px; margin: auto; }
+        .card { background: white; padding: 20px; border-radius: 12px; shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        h2 { color: var(--primary); margin-top: 0; }
+        input, button { width: 100%; padding: 12px; box-sizing: border-box; border-radius: 8px; border: 1px solid #ddd; margin: 5px 0; font-size: 16px; }
+        button { background: var(--primary); color: white; border: none; font-weight: bold; }
+        .player-item { background: #eef2ff; border: 2px solid #6366f1; margin: 8px 0; padding: 12px; border-radius: 8px; cursor: grab; display: flex; justify-content: space-between; }
+        .badge { background: #6366f1; color: white; padding: 2px 8px; border-radius: 50%; font-size: 0.8em; }
+    </style>
+</head>
+<body>
+
+<div class="card" id="login-area">
+    <h2>Bienvenue !</h2>
+    <input type="text" id="username" placeholder="Ton prénom">
+    <button onclick="joinGame()">Rejoindre</button>
+</div>
+
+<div class="card" id="admin-area" style="display:none;">
+    <h3>Banque de questions</h3>
+    <input type="text" id="new-q" placeholder="Qui est le plus... ?">
+    <button onclick="addQuestion()" style="background:#10b981">Ajouter à la banque</button>
+</div>
+
+<div class="card" id="game-area" style="display:none;">
+    <h3 id="current-q">Attente d'une question...</h3>
+    <div id="sort-list"></div>
+    <button onclick="submitVote()" id="btn-vote">Valider mon classement</button>
+</div>
+
+<script>
+    // --- CONFIGURATION FIREBASE ---
+    const firebaseConfig = {
+        apiKey: "AIzaSyBZrjaZ0NuoQkm2i8ZrBZEDm0iFNQ_xwRg",
+        databaseURL: "https://jeux-classement-default-rtdb.europe-west1.firebasedatabase.app",
+        projectId: "jeux-classement",
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    let myName = "";
+    let players = [];
+
+    // --- LOGIQUE REJOINDRE ---
+    function joinGame() {
+        myName = document.getElementById('username').value;
+        if(!myName) return alert("Prénom requis");
+        
+        db.ref('players').push(myName);
+        document.getElementById('login-area').style.display = 'none';
+        document.getElementById('admin-area').style.display = 'block';
+        document.getElementById('game-area').style.display = 'block';
+    }
+
+    // --- BANQUE DE QUESTIONS ---
+    function addQuestion() {
+        const q = document.getElementById('new-q').value;
+        if(q) {
+            db.ref('bank').push(q);
+            db.ref('currentQuestion').set(q); // On lance direct la question
+            document.getElementById('new-q').value = "";
+        }
+    }
+
+    // --- ÉCOUTE DES JOUEURS ET QUESTIONS ---
+    db.ref('players').on('value', snap => {
+        players = Object.values(snap.val() || {});
+        renderList();
+    });
+
+    db.ref('currentQuestion').on('value', snap => {
+        document.getElementById('current-q').innerText = snap.val() || "Attente...";
+        document.getElementById('btn-vote').disabled = false;
+        document.getElementById('btn-vote').innerText = "Valider mon classement";
+    });
+
+    function renderList() {
+        const list = document.getElementById('sort-list');
+        list.innerHTML = "";
+        players.filter(p => p !== myName).forEach(p => {
+            list.innerHTML += `<div class="player-item" data-name="${p}">${p} <span>☰</span></div>`;
+        });
+        new Sortable(list, { animation: 150 });
+    }
+
+    // --- ENVOI DU VOTE ---
+    function submitVote() {
+        const items = document.querySelectorAll('.player-item');
+        const ranking = Array.from(items).map(i => i.getAttribute('data-name'));
+        
+        db.ref('votes/' + myName).set(ranking);
+        document.getElementById('btn-vote').disabled = true;
+        document.getElementById('btn-vote').innerText = "Voté !";
+    }
+</script>
+
+</body>
+</html>
