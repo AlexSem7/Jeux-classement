@@ -53,8 +53,8 @@
 
     <div id="view-results" class="card hidden">
         <h2>🔍 Le Grand Final</h2>
-        <p>Reliez chaque classement à sa question !</p>
         <div id="results-list"></div>
+        <button onclick="resetGame()" style="background:var(--primary); margin-top:20px;">🔄 Rejouer (Nouvelle partie)</button>
     </div>
 
     <div class="card" id="mod-panel">
@@ -125,19 +125,37 @@
         }
 
         // --- JEU ---
-        function startGame() {
-            db.ref('public_bank').once('value', snap => {
-                const bank = snap.val() || {};
-                const questions = Object.values(bank);
-                const randomQ = questions.length > 0 ? questions[Math.floor(Math.random() * questions.length)] : "Qui est le plus sympa ?";
-                
-                db.ref(`rooms/${roomId}`).update({
-                    status: "playing",
-                    currentQuestion: randomQ,
-                    votes: null
-                });
+       function startGame() {
+    db.ref('public_bank').once('value', snap => {
+        const bank = snap.val() || {};
+        const questionsIds = Object.keys(bank);
+        
+        // On récupère les questions déjà posées dans cette room
+        db.ref(`rooms/${roomId}/usedQuestions`).once('value', usedSnap => {
+            const used = Object.values(usedSnap.val() || {});
+            
+            // On filtre pour ne garder que les questions pas encore posées
+            const availableIds = questionsIds.filter(id => !used.includes(bank[id]));
+
+            if (availableIds.length === 0) {
+                alert("Plus de questions dans la banque ! Ajoutez-en de nouvelles.");
+                return;
+            }
+
+            const randomId = availableIds[Math.floor(Math.random() * availableIds.length)];
+            const selectedQ = bank[randomId];
+
+            // On marque la question comme "utilisée" pour cette room
+            db.ref(`rooms/${roomId}/usedQuestions`).push(selectedQ);
+
+            db.ref(`rooms/${roomId}`).update({
+                status: "playing",
+                currentQuestion: selectedQ,
+                votes: null
             });
-        }
+        });
+    });
+}
 
         function startClientGame() {
             hideAll();
@@ -269,8 +287,23 @@
                 </div>`;
             });
         });
-
+        function resetGame() {
+            if(confirm("Voulez-vous vraiment recommencer une nouvelle partie ?")) {
+        // On nettoie TOUTE la room sauf la liste des joueurs
+        db.ref(`rooms/${roomId}`).update({
+            status: "waiting",
+            round: 1,
+            votes: null,
+            history: null,
+            usedQuestions: null, // On vide la liste des questions utilisées
+            currentQuestion: null
+        });
+        hideAll();
+        document.getElementById('view-lobby').classList.remove('hidden');
+    }
+} 
         function deleteQuestion(id) { if(confirm("Supprimer ?")) db.ref(`public_bank/${id}`).remove(); }
     </script>
 </body>
 </html>
+
