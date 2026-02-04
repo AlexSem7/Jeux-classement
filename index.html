@@ -3,107 +3,161 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>L'Effet Miroir</title>
+    <title>L'Effet Miroir - Party</title>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-database-compat.js"></script>
-
     <style>
-        :root { --primary: #6366f1; --bg: #f8fafc; }
-        body { font-family: sans-serif; background: var(--bg); padding: 15px; max-width: 500px; margin: auto; }
-        .card { background: white; padding: 20px; border-radius: 12px; shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        h2 { color: var(--primary); margin-top: 0; }
-        input, button { width: 100%; padding: 12px; box-sizing: border-box; border-radius: 8px; border: 1px solid #ddd; margin: 5px 0; font-size: 16px; }
-        button { background: var(--primary); color: white; border: none; font-weight: bold; }
-        .player-item { background: #eef2ff; border: 2px solid #6366f1; margin: 8px 0; padding: 12px; border-radius: 8px; cursor: grab; display: flex; justify-content: space-between; }
-        .badge { background: #6366f1; color: white; padding: 2px 8px; border-radius: 50%; font-size: 0.8em; }
+        :root { --primary: #6366f1; --secondary: #10b981; --bg: #f1f5f9; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .card { background: white; width: 100%; max-width: 400px; padding: 20px; border-radius: 15px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); margin-bottom: 20px; text-align: center; }
+        input, button { width: 100%; padding: 12px; margin: 8px 0; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 16px; box-sizing: border-box; }
+        button { background: var(--primary); color: white; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button:disabled { background: #cbd5e1; }
+        .player-item { background: white; border: 2px solid var(--primary); margin: 10px 0; padding: 15px; border-radius: 10px; cursor: grab; font-weight: bold; display: flex; justify-content: space-between; }
+        .hidden { display: none; }
+        #room-id-display { background: #e0e7ff; padding: 10px; border-radius: 5px; font-weight: bold; color: var(--primary); margin: 10px 0; }
     </style>
 </head>
 <body>
 
-<div class="card" id="login-area">
-    <h2>Bienvenue !</h2>
-    <input type="text" id="username" placeholder="Ton prénom">
-    <button onclick="joinGame()">Rejoindre</button>
-</div>
+    <div id="view-home" class="card">
+        <h1>🪞 L'Effet Miroir</h1>
+        <button onclick="showCreateRoom()">Créer une partie privée</button>
+        <button onclick="showJoinRoom()" style="background:#64748b">Rejoindre avec un code</button>
+        <hr>
+        <h3>📥 Banque publique</h3>
+        <p style="font-size: 0.9em; color: #666;">Ajoute une question pour tout le monde :</p>
+        <input type="text" id="public-q" placeholder="Qui est le plus... ?">
+        <button onclick="addPublicQuestion()" style="background: var(--secondary)">Ajouter à la banque</button>
+    </div>
 
-<div class="card" id="admin-area" style="display:none;">
-    <h3>Banque de questions</h3>
-    <input type="text" id="new-q" placeholder="Qui est le plus... ?">
-    <button onclick="addQuestion()" style="background:#10b981">Ajouter à la banque</button>
-</div>
+    <div id="view-lobby" class="card hidden">
+        <h2>Salon : <span id="display-room-id"></span></h2>
+        <p>Partage ce code à tes amis !</p>
+        <div id="player-list">Attente de joueurs...</div>
+        <div id="admin-controls" class="hidden">
+            <button onclick="startGame()" style="background: var(--secondary); margin-top: 20px;">DÉMARRER LE JEU</button>
+        </div>
+    </div>
 
-<div class="card" id="game-area" style="display:none;">
-    <h3 id="current-q">Attente d'une question...</h3>
-    <div id="sort-list"></div>
-    <button onclick="submitVote()" id="btn-vote">Valider mon classement</button>
-</div>
+    <div id="view-game" class="card hidden">
+        <h2 id="current-q">Chargement...</h2>
+        <div id="sort-list"></div>
+        <button id="btn-vote" onclick="submitVote()">Valider mon classement</button>
+        <p id="wait-msg" class="hidden">Attente des autres joueurs...</p>
+    </div>
 
-<script>
-    // --- CONFIGURATION FIREBASE ---
+    <script>
+        // --- CONFIGURATION FIREBASE ---
     const firebaseConfig = {
         apiKey: "AIzaSyBZrjaZ0NuoQkm2i8ZrBZEDm0iFNQ_xwRg",
         databaseURL: "https://jeux-classement-default-rtdb.europe-west1.firebasedatabase.app",
         projectId: "jeux-classement",
-    };
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.database();
 
-    let myName = "";
-    let players = [];
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
 
-    // --- LOGIQUE REJOINDRE ---
-    function joinGame() {
-        myName = document.getElementById('username').value;
-        if(!myName) return alert("Prénom requis");
-        
-        db.ref('players').push(myName);
-        document.getElementById('login-area').style.display = 'none';
-        document.getElementById('admin-area').style.display = 'block';
-        document.getElementById('game-area').style.display = 'block';
-    }
+        let roomId = "";
+        let myName = "";
+        let isAdmin = false;
+        let players = [];
 
-    // --- BANQUE DE QUESTIONS ---
-    function addQuestion() {
-        const q = document.getElementById('new-q').value;
-        if(q) {
-            db.ref('bank').push(q);
-            db.ref('currentQuestion').set(q); // On lance direct la question
-            document.getElementById('new-q').value = "";
+        // --- NAVIGATION ---
+        function showCreateRoom() {
+            myName = prompt("Ton prénom ?");
+            if(!myName) return;
+            roomId = Math.random().toString(36).substring(2, 7).toUpperCase();
+            isAdmin = true;
+            initRoom();
         }
-    }
 
-    // --- ÉCOUTE DES JOUEURS ET QUESTIONS ---
-    db.ref('players').on('value', snap => {
-        players = Object.values(snap.val() || {});
-        renderList();
-    });
+        function showJoinRoom() {
+            const code = prompt("Code de la partie ?");
+            if(!code) return;
+            myName = prompt("Ton prénom ?");
+            if(!myName) return;
+            roomId = code.toUpperCase();
+            initRoom();
+        }
 
-    db.ref('currentQuestion').on('value', snap => {
-        document.getElementById('current-q').innerText = snap.val() || "Attente...";
-        document.getElementById('btn-vote').disabled = false;
-        document.getElementById('btn-vote').innerText = "Valider mon classement";
-    });
+        function initRoom() {
+            document.getElementById('view-home').classList.add('hidden');
+            document.getElementById('view-lobby').classList.remove('hidden');
+            document.getElementById('display-room-id').innerText = roomId;
+            
+            if(isAdmin) document.getElementById('admin-controls').classList.remove('hidden');
 
-    function renderList() {
-        const list = document.getElementById('sort-list');
-        list.innerHTML = "";
-        players.filter(p => p !== myName).forEach(p => {
-            list.innerHTML += `<div class="player-item" data-name="${p}">${p} <span>☰</span></div>`;
-        });
-        new Sortable(list, { animation: 150 });
-    }
+            // S'ajouter à la liste des joueurs
+            db.ref(`rooms/${roomId}/players`).push(myName);
 
-    // --- ENVOI DU VOTE ---
-    function submitVote() {
-        const items = document.querySelectorAll('.player-item');
-        const ranking = Array.from(items).map(i => i.getAttribute('data-name'));
-        
-        db.ref('votes/' + myName).set(ranking);
-        document.getElementById('btn-vote').disabled = true;
-        document.getElementById('btn-vote').innerText = "Voté !";
-    }
-</script>
+            // Écouter les joueurs
+            db.ref(`rooms/${roomId}/players`).on('value', snap => {
+                players = Object.values(snap.val() || {});
+                document.getElementById('player-list').innerHTML = "<b>Joueurs :</b><br>" + players.join(', ');
+            });
 
+            // Écouter le lancement du jeu
+            db.ref(`rooms/${roomId}/status`).on('value', snap => {
+                if(snap.val() === "playing") startClientGame();
+            });
+        }
+
+        // --- BANQUE PUBLIQUE ---
+        function addPublicQuestion() {
+            const q = document.getElementById('public-q').value;
+            if(q) {
+                db.ref('public_bank').push(q);
+                alert("Merci ! Question ajoutée.");
+                document.getElementById('public-q').value = "";
+            }
+        }
+
+        // --- LOGIQUE DE JEU ---
+        function startGame() {
+            // Piocher une question au hasard dans la banque publique
+            db.ref('public_bank').once('value', snap => {
+                const questions = Object.values(snap.val() || { "0": "Qui est le plus drôle ?" });
+                const randomQ = questions[Math.floor(Math.random() * questions.length)];
+                
+                db.ref(`rooms/${roomId}`).update({
+                    status: "playing",
+                    currentQuestion: randomQ,
+                    votes: null
+                });
+            });
+        }
+
+        function startClientGame() {
+            document.getElementById('view-lobby').classList.add('hidden');
+            document.getElementById('view-game').classList.remove('hidden');
+            
+            db.ref(`rooms/${roomId}/currentQuestion`).on('value', snap => {
+                document.getElementById('current-q').innerText = snap.val();
+                renderSortable();
+                document.getElementById('btn-vote').classList.remove('hidden');
+                document.getElementById('wait-msg').classList.add('hidden');
+            });
+        }
+
+        function renderSortable() {
+            const list = document.getElementById('sort-list');
+            list.innerHTML = "";
+            players.filter(p => p !== myName).forEach(p => {
+                list.innerHTML += `<div class="player-item" data-name="${p}">${p} <span>☰</span></div>`;
+            });
+            new Sortable(list, { animation: 150 });
+        }
+
+        function submitVote() {
+            const items = document.querySelectorAll('.player-item');
+            const ranking = Array.from(items).map(i => i.getAttribute('data-name'));
+            db.ref(`rooms/${roomId}/votes/${myName}`).set(ranking);
+            
+            document.getElementById('btn-vote').classList.add('hidden');
+            document.getElementById('wait-msg').classList.remove('hidden');
+        }
+    </script>
 </body>
 </html>
