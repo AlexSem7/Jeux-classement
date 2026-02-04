@@ -8,15 +8,16 @@
     <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.1.3/firebase-database-compat.js"></script>
     <style>
-        :root { --primary: #6366f1; --secondary: #10b981; --bg: #f1f5f9; }
+        :root { --primary: #6366f1; --secondary: #10b981; --bg: #f1f5f9; --accent: #f59e0b; }
         body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
-        .card { background: white; width: 100%; max-width: 400px; padding: 20px; border-radius: 15px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); margin-bottom: 20px; text-align: center; }
+        .card { background: white; width: 100%; max-width: 400px; padding: 20px; border-radius: 15px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); margin-bottom: 20px; text-align: center; box-sizing: border-box; }
         input, button { width: 100%; padding: 12px; margin: 8px 0; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 16px; box-sizing: border-box; }
         button { background: var(--primary); color: white; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; }
-        button:disabled { background: #cbd5e1; }
+        button:active { transform: scale(0.98); }
         .player-item { background: white; border: 2px solid var(--primary); margin: 10px 0; padding: 15px; border-radius: 10px; cursor: grab; font-weight: bold; display: flex; justify-content: space-between; }
         .hidden { display: none; }
-        #room-id-display { background: #e0e7ff; padding: 10px; border-radius: 5px; font-weight: bold; color: var(--primary); margin: 10px 0; }
+        .result-item { text-align: left; padding: 10px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; }
+        #mod-panel { margin-top: 50px; border: 1px dashed #ccc; background: #fffcf0; }
     </style>
 </head>
 <body>
@@ -27,34 +28,45 @@
         <button onclick="showJoinRoom()" style="background:#64748b">Rejoindre avec un code</button>
         <hr>
         <h3>📥 Banque publique</h3>
-        <p style="font-size: 0.9em; color: #666;">Ajoute une question pour tout le monde :</p>
         <input type="text" id="public-q" placeholder="Qui est le plus... ?">
-        <button onclick="addPublicQuestion()" style="background: var(--secondary)">Ajouter à la banque</button>
+        <button onclick="addPublicQuestion()" style="background: var(--secondary)">Ajouter la question</button>
     </div>
 
     <div id="view-lobby" class="card hidden">
-        <h2>Salon : <span id="display-room-id"></span></h2>
-        <p>Partage ce code à tes amis !</p>
-        <div id="player-list">Attente de joueurs...</div>
+        <h2>Salon : <span id="display-room-id" style="color:var(--primary)"></span></h2>
+        <div id="player-list" style="margin: 15px 0;">Attente de joueurs...</div>
         <div id="admin-controls" class="hidden">
-            <button onclick="startGame()" style="background: var(--secondary); margin-top: 20px;">DÉMARRER LE JEU</button>
+            <button onclick="startGame()" style="background: var(--secondary)">DÉMARRER LE JEU</button>
         </div>
     </div>
 
     <div id="view-game" class="card hidden">
-        <h2 id="current-q">Chargement...</h2>
+        <h3 id="current-q">Chargement...</h3>
         <div id="sort-list"></div>
         <button id="btn-vote" onclick="submitVote()">Valider mon classement</button>
-        <p id="wait-msg" class="hidden">Attente des autres joueurs...</p>
+        <p id="wait-msg" class="hidden" style="color: #666; font-style: italic;">Attente des autres joueurs...</p>
+        <div id="admin-reveal" class="hidden">
+            <button onclick="revealResults()" style="background: var(--accent)">RÉVÉLER LE CLASSEMENT</button>
+        </div>
+    </div>
+
+    <div id="view-results" class="card hidden">
+        <h2>Résultats Finales</h2>
+        <div id="results-list"></div>
+        <button onclick="backToLobby()" style="margin-top:20px;">Nouvelle Question</button>
+    </div>
+
+    <div class="card" id="mod-panel">
+        <h4>🛠 Modération Banque (Admin)</h4>
+        <div id="full-bank-list" style="text-align:left; font-size:0.8em; max-height:200px; overflow-y:auto;"></div>
     </div>
 
     <script>
-        // --- CONFIGURATION FIREBASE ---
-    const firebaseConfig = {
-        apiKey: "AIzaSyBZrjaZ0NuoQkm2i8ZrBZEDm0iFNQ_xwRg",
-        databaseURL: "https://jeux-classement-default-rtdb.europe-west1.firebasedatabase.app",
-        projectId: "jeux-classement",
-
+        // --- CONFIGURATION FIREBASE (REMPLACE AVEC TES CLÉS) ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyBZrjaZ0NuoQkm2i8ZrBZEDm0iFNQ_xwRg",
+            databaseURL: "https://jeux-classement-default-rtdb.europe-west1.firebasedatabase.app",
+            projectId: "jeux-classement",
         };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
@@ -64,7 +76,7 @@
         let isAdmin = false;
         let players = [];
 
-        // --- NAVIGATION ---
+        // --- GESTION DES ROOMS ---
         function showCreateRoom() {
             myName = prompt("Ton prénom ?");
             if(!myName) return;
@@ -83,43 +95,33 @@
         }
 
         function initRoom() {
-            document.getElementById('view-home').classList.add('hidden');
+            hideAll();
             document.getElementById('view-lobby').classList.remove('hidden');
             document.getElementById('display-room-id').innerText = roomId;
-            
             if(isAdmin) document.getElementById('admin-controls').classList.remove('hidden');
 
-            // S'ajouter à la liste des joueurs
             db.ref(`rooms/${roomId}/players`).push(myName);
 
-            // Écouter les joueurs
             db.ref(`rooms/${roomId}/players`).on('value', snap => {
                 players = Object.values(snap.val() || {});
-                document.getElementById('player-list').innerHTML = "<b>Joueurs :</b><br>" + players.join(', ');
+                document.getElementById('player-list').innerHTML = "<b>Joueurs connectés :</b><br>" + players.join(', ');
             });
 
-            // Écouter le lancement du jeu
             db.ref(`rooms/${roomId}/status`).on('value', snap => {
-                if(snap.val() === "playing") startClientGame();
+                const status = snap.val();
+                if(status === "playing") startClientGame();
+                if(status === "finished") showResults();
             });
+
+            db.ref(`rooms/${roomId}/votes`).on('value', checkVotesStatus);
         }
 
-        // --- BANQUE PUBLIQUE ---
-        function addPublicQuestion() {
-            const q = document.getElementById('public-q').value;
-            if(q) {
-                db.ref('public_bank').push(q);
-                alert("Merci ! Question ajoutée.");
-                document.getElementById('public-q').value = "";
-            }
-        }
-
-        // --- LOGIQUE DE JEU ---
+        // --- JEU ---
         function startGame() {
-            // Piocher une question au hasard dans la banque publique
             db.ref('public_bank').once('value', snap => {
-                const questions = Object.values(snap.val() || { "0": "Qui est le plus drôle ?" });
-                const randomQ = questions[Math.floor(Math.random() * questions.length)];
+                const bank = snap.val() || {};
+                const questions = Object.values(bank);
+                const randomQ = questions.length > 0 ? questions[Math.floor(Math.random() * questions.length)] : "Qui est le plus sympa ?";
                 
                 db.ref(`rooms/${roomId}`).update({
                     status: "playing",
@@ -130,14 +132,15 @@
         }
 
         function startClientGame() {
-            document.getElementById('view-lobby').classList.add('hidden');
+            hideAll();
             document.getElementById('view-game').classList.remove('hidden');
-            
-            db.ref(`rooms/${roomId}/currentQuestion`).on('value', snap => {
+            document.getElementById('btn-vote').classList.remove('hidden');
+            document.getElementById('wait-msg').classList.add('hidden');
+            document.getElementById('admin-reveal').classList.add('hidden');
+
+            db.ref(`rooms/${roomId}/currentQuestion`).once('value', snap => {
                 document.getElementById('current-q').innerText = snap.val();
                 renderSortable();
-                document.getElementById('btn-vote').classList.remove('hidden');
-                document.getElementById('wait-msg').classList.add('hidden');
             });
         }
 
@@ -154,9 +157,88 @@
             const items = document.querySelectorAll('.player-item');
             const ranking = Array.from(items).map(i => i.getAttribute('data-name'));
             db.ref(`rooms/${roomId}/votes/${myName}`).set(ranking);
-            
             document.getElementById('btn-vote').classList.add('hidden');
             document.getElementById('wait-msg').classList.remove('hidden');
+        }
+
+        function checkVotesStatus() {
+            db.ref(`rooms/${roomId}/votes`).once('value', snap => {
+                const votes = snap.val() || {};
+                const nbVotes = Object.keys(votes).length;
+                if (isAdmin && nbVotes > 0 && nbVotes === players.length) {
+                    document.getElementById('admin-reveal').classList.remove('hidden');
+                }
+            });
+        }
+
+        function revealResults() {
+            db.ref(`rooms/${roomId}`).update({ status: "finished" });
+        }
+
+        function showResults() {
+            hideAll();
+            document.getElementById('view-results').classList.remove('hidden');
+            
+            db.ref(`rooms/${roomId}/votes`).once('value', snap => {
+                const allVotes = snap.val() || {};
+                let scores = {};
+                players.forEach(p => scores[p] = 0);
+                const totalVotants = Object.keys(allVotes).length;
+
+                Object.values(allVotes).forEach(voteList => {
+                    voteList.forEach((name, index) => {
+                        if(scores[name] !== undefined) scores[name] += (index + 1);
+                    });
+                });
+
+                let finalOrder = Object.keys(scores)
+                    .map(name => ({name, score: (scores[name] / totalVotants).toFixed(1)}))
+                    .sort((a, b) => a.score - b.score);
+
+                const resDiv = document.getElementById('results-list');
+                resDiv.innerHTML = "";
+                finalOrder.forEach((item, i) => {
+                    resDiv.innerHTML += `<div class="result-item"><span>${i+1}. ${item.name}</span> <b>${item.score}</b></div>`;
+                });
+            });
+        }
+
+        function backToLobby() {
+            if(isAdmin) {
+                db.ref(`rooms/${roomId}`).update({ status: "waiting", votes: null });
+            }
+        }
+
+        function hideAll() {
+            ['view-home', 'view-lobby', 'view-game', 'view-results'].forEach(id => {
+                document.getElementById(id).classList.add('hidden');
+            });
+        }
+
+        // --- BANQUE & MODÉRATION ---
+        function addPublicQuestion() {
+            const q = document.getElementById('public-q').value;
+            if(q) {
+                db.ref('public_bank').push(q);
+                document.getElementById('public-q').value = "";
+                alert("Ajoutée !");
+            }
+        }
+
+        db.ref('public_bank').on('value', snap => {
+            const bank = snap.val() || {};
+            const div = document.getElementById('full-bank-list');
+            div.innerHTML = "";
+            Object.keys(bank).forEach(id => {
+                div.innerHTML += `<div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                    <span>${bank[id]}</span>
+                    <button onclick="deleteQuestion('${id}')" style="width:30px; background:red; padding:2px; font-size:10px;">X</button>
+                </div>`;
+            });
+        });
+
+        function deleteQuestion(id) {
+            if(confirm("Supprimer ?")) db.ref(`public_bank/${id}`).remove();
         }
     </script>
 </body>
